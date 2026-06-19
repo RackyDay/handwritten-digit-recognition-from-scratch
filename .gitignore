@@ -208,4 +208,6 @@ __marimo__/
 
 #Project files
 training_data/
+model.npz
+
 

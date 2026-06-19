@@ -1,5 +1,7 @@
 import random
 import math
+import numpy as np
+import matplotlib.pyplot as plt
 
 training_images = 'training_data/train-images.idx3-ubyte'
 training_labels = 'training_data/train-labels.idx1-ubyte'
@@ -7,28 +9,27 @@ training_labels = 'training_data/train-labels.idx1-ubyte'
 def read_images(data_path):
     with open(data_path, 'rb') as f:
         f.read(16) #skip the header
-        raw_data = f.read()
-
-        images = [[pixel/255 for pixel in raw_data[i * 784: (i+1) * 784]]
-                for i in range(60000)]
+        raw_data = np.frombuffer(f.read(), dtype=np.uint8)
+        images = raw_data.reshape(-1, 784).astype(np.float32)/255
     
     return images
 
 def read_labels(data_path):
     with open(data_path, 'rb') as f:
         f.read(8)
-        return list(f.read())
+        return np.frombuffer(f.read(), dtype=np.uint8)
 
 def create_neural_network(layer_sizes):
+
     weights = []
     biases = []
 
     for i in range(1, len(layer_sizes)):
-        weight_matrix = [[(random.random() - 0.5) * 0.1 for _ in range(layer_sizes[i-1])] for _ in range(layer_sizes[i])]
-        #(current layer size) lists of length (previous layer size) i.e. 128 lists of 784, 64 lists of 128, 10 lists of 64
-        
-        bias_matrix = [0] * layer_sizes[i]
+
+        weight_matrix = np.random.uniform(-0.05, 0.05, (layer_sizes[i], layer_sizes[i-1]))
         weights.append(weight_matrix)
+
+        bias_matrix = np.zeros(layer_sizes[i])
         biases.append(bias_matrix)
     
     return weights, biases
@@ -43,108 +44,69 @@ def forward_prop(weights, biases, image):
         W = weights[l]
         b = biases[l]
 
-        z = [0] * len(W)
-        a = [0] * len(W)
+        z = np.zeros(len(W))
+        a = np.zeros(len(W))
         prev_a = activations[-1]
-
-        for current_neuron in range(len(W)): #go through each neuron in current layer
-            partial_sum = 0
-            for previous_neuron in range(len(W[current_neuron])): #go through each neuron in previous layer
-                partial_sum += (W[current_neuron][previous_neuron] * prev_a[previous_neuron])
-            z[current_neuron] = partial_sum + b[current_neuron]
+        
+        z = W @ prev_a + b
 
         if l == len(weights) -1:
-            softmax(z, a)
+            a = softmax(z)
         else:
-            reLU(z, a)
+            a = reLU(z)
         
         pre_activations.append(z)
         activations.append(a)
 
     return pre_activations, activations
 
-def softmax(pre, post):
-    exp_sum = 0
-    max_val = max(pre)
+def softmax(z):
+    z = z - np.max(z)
+    exp_z = np.exp(z)
+    return exp_z/np.sum(exp_z)
 
-    for i in range(len(pre)):
-        exp_sum += math.exp(pre[i] - max_val) #subtract max so exp doesn't overflow
-    
-    for i in range(len(pre)):
-        post[i] = math.exp(pre[i] - max_val)/exp_sum
-
-    return
-
-def reLU(pre, post):
-    for i in range(len(pre)):
-        post[i] = max(0, pre[i])
-    return
+def reLU(z):
+    return np.maximum(0, z)
 
 def calculate_cost(label, activations):
     confidence = activations[-1][label]
-    return -1 * math.log(confidence)
+    return -np.log(confidence)
 
 def back_prop(weights, biases, pre_activations, activations, label):
 
     dW, dB = create_gradient_accumulators(weights, biases)
 
-    delta = activations[-1][:]
+    delta = activations[-1].copy()
     delta[label] -=1
 
     for l in reversed(range(len(weights))):
-        for j in range(len(delta)):
-            dB[l][j] = delta[j]
-            for i in range(len(activations[l])):
-                dW[l][j][i] = delta[j] * activations[l][i]
+        dB[l] = delta
+        dW[l] = np.outer(delta, activations[l])
     
         if l > 0:
-            new_delta = [0] * len(activations[l])
+            new_delta = weights[l].T @ delta
+            delta = new_delta * (pre_activations[l] > 0)
 
-            for i in range(len(new_delta)):
-                partial_sum = 0
-                for j in range(len(delta)):
-                    product = weights[l][j][i] * delta[j]
-                    partial_sum += product
-                if pre_activations[l][i] > 0:
-                    new_delta[i] = partial_sum 
-                else:
-                    new_delta[i] = 0
-            delta = new_delta
     return dW, dB
 
 def sum_gradients(acc_dW, acc_dB, dW, dB):
-    for l in range(len(dW)):
-        current_dW = dW[l]
-        current_dB = dB[l]
-        for b in range(len(current_dB)):
-            acc_dB[l][b] += current_dB[b]
-        
-        for i in range(len(current_dW)):
-            for j in range(len(current_dW[i])):
-                acc_dW[l][i][j] += current_dW[i][j]
 
+    for l in range(len(dW)):
+        acc_dW[l] += dW[l]
+        acc_dB[l] += dB[l]
+    
     return acc_dW, acc_dB
 
 def update_gradients(weights, biases, acc_dW, acc_dB, learning_rate, batch_size):
+
     for l in range(len(weights)):
-        for b in range(len(biases[l])):
-            biases[l][b] -= learning_rate * (acc_dB[l][b]/batch_size)
-        
-        for i in range(len(weights[l])):
-            for j in range(len(weights[l][i])):
-                weights[l][i][j] -= learning_rate * (acc_dW[l][i][j]/batch_size)
+        biases[l] -= learning_rate * (acc_dB[l]/batch_size)
+        weights[l] -= learning_rate * (acc_dW[l]/batch_size)
 
 def create_gradient_accumulators(weights, biases):
 
-    dW = []
-    dB = []
-
-    for l in range(len(weights)):
-        current_weights = weights[l]
-        current_biases = biases[l]
-
-        dB.append([0] * len(current_biases))
-        dW.append([[0 for _ in range(len(current_weights[0]))] for _ in range(len(current_weights))])
+    dW = [np.zeros_like(W) for W in weights]
+    dB = [np.zeros_like(b) for b in biases]
     
     return dW, dB
 
@@ -153,59 +115,77 @@ def create_batches(training_data, batch_size):
     for i in range(0, len(training_data), batch_size):
         yield training_data[i: i+batch_size]
 
-def train(weights, biases, training_data, epochs, batch_size, learning_rate):
+def train(weights, biases, images, labels, epochs, batch_size, learning_rate):
+
+    n = len(labels)
 
     for epoch in range(epochs):
-        for index, batch in enumerate(create_batches(training_data, batch_size)):
+        
+        indices = np.arange(n)
+        np.random.shuffle(indices)
+
+        for start in range(0, n, batch_size):
+            end = start + batch_size
+            batch_idx = indices[start:end]
             
             correct = 0
-            total = 0
-            total_cost = 0
+            batch_loss = 0
+
             acc_dW, acc_dB = create_gradient_accumulators(weights, biases)
 
-            for image, label in batch:
+            for i in batch_idx:
+                image = images[i]
+                label = labels[i]
+
                 pre_activations, activations = forward_prop(weights, biases, image)
                 dW, dB = back_prop(weights, biases, pre_activations, activations, label)
                 acc_dW, acc_dB = sum_gradients(acc_dW, acc_dB, dW, dB)
-                total_cost += calculate_cost(label, activations)
-                predicted = activations[-1].index(max(activations[-1]))
-                if predicted == label:
-                    correct +=1
-                total +=1
+
+                if np.argmax(activations[-1]) == label:
+                    correct += 1
+                
+                batch_loss += calculate_cost(label, activations)
 
             update_gradients(weights, biases, acc_dW, acc_dB, learning_rate, batch_size)
-            print("epoch:", epoch + 1, "batch:", index + 1, "cost:", total_cost/batch_size, "accuracy:", correct/total)
+            acc = correct / len(batch_idx)
+            loss = batch_loss / len(batch_idx)
+            print(f"epoch: {epoch + 1} batch: {start//batch_size} cost: {loss:.4f} accuracy: {acc:.2f}")
 
     return None
+
+def show_image(image, label, prediction):
+    plt.imshow(image.reshape(28, 28), cmap='gray')
+    plt.title(f"Label: {label}, Pred: {prediction}")
+    plt.axis('off')
+    plt.show()
+
 
 images = read_images(training_images)
 labels = read_labels(training_labels)
 
-data = list(zip(images, labels))
-random.shuffle(data)
+train_images = images[:48000]
+train_labels = labels[:48000]
 
-train_data = data[:48000]
-test_data = data[48000:]
+test_images = images[48000:]
+test_labels = labels[48000:]
 
 layer_sizes = [784, 128, 64, 10]
 weights, biases = create_neural_network(layer_sizes)
-train(weights, biases, train_data, 8, 100, 0.1)
+train(weights, biases, train_images, train_labels, 8, 100, 0.1)
 
-with open("weights.txt", "w") as f:
-    f.write(str(weights))
+counter = 0
+for i in range(len(test_images)):
+    test_image = test_images[i]
+    test_label = test_labels[i]
+    pre_activations, activations = forward_prop(weights, biases, test_image)
+    if np.argmax(activations[-1]) == test_label:
+        counter +=1
+    else:
+        show_image(test_image, test_label, np.argmax(activations[-1]))
 
-with open("biases.txt", "w") as f:
-    f.write(str(biases))
 
-correct = 0
-count = 0
-for image, label in test_data:
-    count +=1
-    pre_activations, activations = forward_prop(weights, biases, image)
-    cost = calculate_cost(label, activations)
-    pred = activations[-1].index(max(activations[-1]))
-    if pred == label:
-        correct +=1
-    print("Example", count, "Prediction:", pred, "Actual:", label, "Correct:", (pred == label))
+    
+print(f"Accuracy on test data: {(counter/12000) * 100}%")
+    
 
-print("Accuracy: ", (correct/12000) * 100)
+np.savez("model.npz", weights=weights, biases=biases)
