@@ -204,25 +204,7 @@ def predict(image, weights, biases):
     return softmax(weights[-1] @ a + biases[-1])
 
 '''
-images = read_images(training_images)
-labels = read_labels(training_labels)
 
-train_images = images[:48000]
-train_labels = labels[:48000]
-
-test_images = images[48000:]
-test_labels = labels[48000:]
-
-layer_sizes = [784, 128, 64, 10]
-weights, biases = create_neural_network(layer_sizes)
-
-train(weights, biases, train_images, train_labels, 8, 100, 0.1)
-
-accuracy = test(test_images, test_labels, weights, biases)
-print(f"Accuracy on test data: {accuracy}%")
-
-save_model(weights, biases)
-'''
 images = read_images(training_images)
 labels = read_labels(training_labels)
 
@@ -238,4 +220,4 @@ for i in range(len(test_images)):
     output = predict(test_images[i], weights, biases)
 
     print(f"Predicted: {np.argmax(output)}, Expected: {test_labels[i]}") if not np.argmax(output) == test_labels[i] else None
-
+'''
