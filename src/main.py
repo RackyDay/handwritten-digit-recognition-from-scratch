@@ -26,7 +26,7 @@ def create_neural_network(layer_sizes):
 
     for i in range(1, len(layer_sizes)):
 
-        weight_matrix = np.random.uniform(-0.05, 0.05, (layer_sizes[i], layer_sizes[i-1]))
+        weight_matrix = np.random.uniform(-0.05, 0.05, (layer_sizes[i], layer_sizes[i-1])) #matrix with # of neurons in current layer rows and # of neurons in previous layer columns
         weights.append(weight_matrix)
 
         bias_matrix = np.zeros(layer_sizes[i])
@@ -43,14 +43,12 @@ def forward_prop(weights, biases, image):
 
         W = weights[l]
         b = biases[l]
-
-        z = np.zeros(len(W))
-        a = np.zeros(len(W))
-        prev_a = activations[-1]
+        
+        prev_a = activations[-1] #initially image
         
         z = W @ prev_a + b
 
-        if l == len(weights) -1:
+        if l == len(weights) -1: #final layer
             a = softmax(z)
         else:
             a = reLU(z)
@@ -77,7 +75,7 @@ def back_prop(weights, biases, pre_activations, activations, label):
     dW, dB = create_gradient_accumulators(weights, biases)
 
     delta = activations[-1].copy()
-    delta[label] -=1
+    delta[label] -=1 #derivative of the loss with respect to the output layer pre activations
 
     for l in reversed(range(len(weights))):
         dB[l] = delta
@@ -153,13 +151,59 @@ def train(weights, biases, images, labels, epochs, batch_size, learning_rate):
 
     return None
 
+def test(test_images, test_labels, weights, biases):
+    counter = 0
+    for i in range(len(test_images)):
+        test_image = test_images[i]
+        test_label = test_labels[i]
+
+        pre_activations, activations = forward_prop(weights, biases, test_image)
+
+        if np.argmax(activations[-1]) == test_label:
+            counter +=1
+        
+    return (counter/12000) * 100
+
 def show_image(image, label, prediction):
     plt.imshow(image.reshape(28, 28), cmap='gray')
     plt.title(f"Label: {label}, Pred: {prediction}")
     plt.axis('off')
     plt.show()
 
+def save_model(weights, biases):
+    model = {}
 
+    for i, (W, b) in enumerate(zip(weights, biases), start = 1):
+        model[f"W{i}"] = W
+        model[f"b{i}"] = b
+    
+    np.savez("model.npz", **model)
+
+def load_model(model):
+
+    data = np.load(model, allow_pickle=True)
+    weights = []
+    biases = []
+
+    i = 1
+    while f"W{i}" in data:
+        weights.append(data[f"W{i}"])
+        biases.append(data[f"b{i}"])
+        i +=1
+    
+    return weights, biases
+
+def predict(image, weights, biases):
+    a = image
+
+    for i in range(len(weights) - 1):
+        W = weights[i]
+        b = biases[i]
+        a = reLU(W @ a + b)
+    
+    return softmax(weights[-1] @ a + biases[-1])
+
+'''
 images = read_images(training_images)
 labels = read_labels(training_labels)
 
@@ -171,21 +215,27 @@ test_labels = labels[48000:]
 
 layer_sizes = [784, 128, 64, 10]
 weights, biases = create_neural_network(layer_sizes)
+
 train(weights, biases, train_images, train_labels, 8, 100, 0.1)
 
-counter = 0
+accuracy = test(test_images, test_labels, weights, biases)
+print(f"Accuracy on test data: {accuracy}%")
+
+save_model(weights, biases)
+'''
+images = read_images(training_images)
+labels = read_labels(training_labels)
+
+train_images = images[:48000]
+train_labels = labels[:48000]
+
+test_images = images[48000:]
+test_labels = labels[48000:]
+
+weights, biases = load_model("model.npz")
+
 for i in range(len(test_images)):
-    test_image = test_images[i]
-    test_label = test_labels[i]
-    pre_activations, activations = forward_prop(weights, biases, test_image)
-    if np.argmax(activations[-1]) == test_label:
-        counter +=1
-    else:
-        show_image(test_image, test_label, np.argmax(activations[-1]))
+    output = predict(test_images[i], weights, biases)
 
+    print(f"Predicted: {np.argmax(output)}, Expected: {test_labels[i]}") if not np.argmax(output) == test_labels[i] else None
 
-    
-print(f"Accuracy on test data: {(counter/12000) * 100}%")
-    
-
-np.savez("model.npz", weights=weights, biases=biases)
