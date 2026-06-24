@@ -1,57 +1,232 @@
-import tkinter as tk
-from model import load_model, predict
+import random
+import math
 import numpy as np
+import matplotlib.pyplot as plt
+from fastapi import FastAPI
+from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
 
-root = tk.Tk()
-root.title("DigitGuessr")
-weights, biases = load_model("model.npz")
+training_images = 'training_data/train-images.idx3-ubyte'
+training_labels = 'training_data/train-labels.idx1-ubyte'
 
-canvas_x, canvas_y = 280, 280
-canvas = tk.Canvas(root, width = canvas_x, height = canvas_y, bg="black")
-canvas.pack()
-
-brush_radius = tk.IntVar(value=8)
-pixels = np.zeros((canvas_x, canvas_y))
-
-predict_job = None
-
-def paint(event):
-    global predict_job
-    radius = brush_radius.get()
-    x, y = event.x, event.y
-
-    canvas.create_oval(
-        x - radius, y - radius,
-        x + radius, y + radius,
-        fill = "white",
-        outline="white"
-    )
-
-    pixels[max(0, y - radius):y + radius, max(0, x - radius): x+radius] = 1.0
-
-    if predict_job is not None:
-        root.after_cancel(predict_job)
+def read_images(data_path):
+    with open(data_path, 'rb') as f:
+        f.read(16) #skip the header
+        raw_data = np.frombuffer(f.read(), dtype=np.uint8)
+        images = raw_data.reshape(-1, 784).astype(np.float32)/255
     
-    predict_job = root.after(250, make_prediction)
+    return images
 
-def clear():
-    canvas.delete("all")
-    pixels[:] = 0
+def read_labels(data_path):
+    with open(data_path, 'rb') as f:
+        f.read(8)
+        return np.frombuffer(f.read(), dtype=np.uint8)
 
-def make_prediction():
-    small = pixels.reshape(28, 10, 28, 10).max(axis=(1, 3))
-    image = small.flatten()
+def create_neural_network(layer_sizes):
+
+    weights = []
+    biases = []
+
+    for i in range(1, len(layer_sizes)):
+
+        weight_matrix = np.random.uniform(-0.05, 0.05, (layer_sizes[i], layer_sizes[i-1])) #matrix with # of neurons in current layer rows and # of neurons in previous layer columns
+        weights.append(weight_matrix)
+
+        bias_matrix = np.zeros(layer_sizes[i])
+        biases.append(bias_matrix)
+    
+    return weights, biases
+
+def forward_prop(weights, biases, image):
+
+    activations = [image.copy()]
+    pre_activations = [None]
+
+    for l in range(len(weights)): #loops through every layer
+
+        W = weights[l]
+        b = biases[l]
+        
+        prev_a = activations[-1] #initially image
+        
+        z = W @ prev_a + b
+
+        if l == len(weights) -1: #final layer
+            a = softmax(z)
+        else:
+            a = reLU(z)
+        
+        pre_activations.append(z)
+        activations.append(a)
+
+    return pre_activations, activations
+
+def softmax(z):
+    z = z - np.max(z)
+    exp_z = np.exp(z)
+    return exp_z/np.sum(exp_z)
+
+def reLU(z):
+    return np.maximum(0, z)
+
+def calculate_cost(label, activations):
+    confidence = activations[-1][label]
+    return -np.log(confidence)
+
+def back_prop(weights, biases, pre_activations, activations, label):
+
+    dW, dB = create_gradient_accumulators(weights, biases)
+
+    delta = activations[-1].copy()
+    delta[label] -=1 #derivative of the loss with respect to the output layer pre activations
+
+    for l in reversed(range(len(weights))):
+        dB[l] = delta
+        dW[l] = np.outer(delta, activations[l])
+    
+        if l > 0:
+            new_delta = weights[l].T @ delta
+            delta = new_delta * (pre_activations[l] > 0)
+
+    return dW, dB
+
+def sum_gradients(acc_dW, acc_dB, dW, dB):
+
+    for l in range(len(dW)):
+        acc_dW[l] += dW[l]
+        acc_dB[l] += dB[l]
+    
+    return acc_dW, acc_dB
+
+def update_gradients(weights, biases, acc_dW, acc_dB, learning_rate, batch_size):
+
+    for l in range(len(weights)):
+        biases[l] -= learning_rate * (acc_dB[l]/batch_size)
+        weights[l] -= learning_rate * (acc_dW[l]/batch_size)
+
+def create_gradient_accumulators(weights, biases):
+
+    dW = [np.zeros_like(W) for W in weights]
+    dB = [np.zeros_like(b) for b in biases]
+    
+    return dW, dB
+
+def create_batches(training_data, batch_size):
+    random.shuffle(training_data)
+    for i in range(0, len(training_data), batch_size):
+        yield training_data[i: i+batch_size]
+
+def train(weights, biases, images, labels, epochs, batch_size, learning_rate):
+
+    n = len(labels)
+
+    for epoch in range(epochs):
+        
+        indices = np.arange(n)
+        np.random.shuffle(indices)
+
+        for start in range(0, n, batch_size):
+            end = start + batch_size
+            batch_idx = indices[start:end]
+            
+            correct = 0
+            batch_loss = 0
+
+            acc_dW, acc_dB = create_gradient_accumulators(weights, biases)
+
+            for i in batch_idx:
+                image = images[i]
+                label = labels[i]
+
+                pre_activations, activations = forward_prop(weights, biases, image)
+                dW, dB = back_prop(weights, biases, pre_activations, activations, label)
+                acc_dW, acc_dB = sum_gradients(acc_dW, acc_dB, dW, dB)
+
+                if np.argmax(activations[-1]) == label:
+                    correct += 1
+                
+                batch_loss += calculate_cost(label, activations)
+
+            update_gradients(weights, biases, acc_dW, acc_dB, learning_rate, batch_size)
+            acc = correct / len(batch_idx)
+            loss = batch_loss / len(batch_idx)
+            print(f"epoch: {epoch + 1} batch: {start//batch_size} cost: {loss:.4f} accuracy: {acc:.2f}")
+
+    return None
+
+def test(test_images, test_labels, weights, biases):
+    counter = 0
+    for i in range(len(test_images)):
+        test_image = test_images[i]
+        test_label = test_labels[i]
+
+        pre_activations, activations = forward_prop(weights, biases, test_image)
+
+        if np.argmax(activations[-1]) == test_label:
+            counter +=1
+        
+    return (counter/12000) * 100
+
+def show_image(image, label, prediction):
+    plt.imshow(image.reshape(28, 28), cmap='gray')
+    plt.title(f"Label: {label}, Pred: {prediction}")
+    plt.axis('off')
+    plt.show()
+
+def save_model(weights, biases):
+    model = {}
+
+    for i, (W, b) in enumerate(zip(weights, biases), start = 1):
+        model[f"W{i}"] = W
+        model[f"b{i}"] = b
+    
+    np.savez("model.npz", **model)
+
+def load_model(model):
+
+    data = np.load(model, allow_pickle=True)
+    weights = []
+    biases = []
+
+    i = 1
+    while f"W{i}" in data:
+        weights.append(data[f"W{i}"])
+        biases.append(data[f"b{i}"])
+        i +=1
+    
+    return weights, biases
+
+def predict(image, weights, biases):
+    a = image
+
+    for i in range(len(weights) - 1):
+        W = weights[i]
+        b = biases[i]
+        a = reLU(W @ a + b)
+    
+    return softmax(weights[-1] @ a + biases[-1])
+
+weights, biases = load_model("../model.npz")
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class Request(BaseModel):
+    pixels: list[float]
+
+@app.get("/")
+def home():
+    return {"msg": "API running"}
+
+@app.post("/predict")
+def make_prediction(data: Request):
+    image = np.array(data.pixels)
     prediction = predict(image, weights, biases)
+    print(prediction)
+    return {"prediction": prediction.tolist()}
     
-    print(np.argmax(prediction))
-
-canvas.bind("<B1-Motion>", paint)
-
-frame = tk.Frame(root)
-frame.pack()
-
-tk.Label(frame, text="Brush Radius: ").grid(row=0, column = 0)
-tk.Scale(frame, from_=1, to=30, orient="horizontal", variable=brush_radius).grid(row=0, column=1)
-tk.Button(frame, text="Clear", command=clear).grid(row=0, column=2)
-
-root.mainloop()

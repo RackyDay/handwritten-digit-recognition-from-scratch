@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>DigitGuessr</title>
+    <style>
+        body {
+            background-color: #0f0f0f;
+            margin: 0;
+            height: 100vh;
+        }
+
+        canvas {
+            touch-action: none;
+        }
+
+        .container{
+            display: flex;
+            height: 100%;
+        }
+
+        .left {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .right {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #FBF5F3;
+        }
+
+        .col {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            }
+        
+        .bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 5px 0;
+        }
+
+        .track {
+            width: 150px;
+            height: 10px;
+            background: #333;
+        }
+
+        .fill {
+            height: 10px;
+            background: #3772FF;
+        }
+
+    </style>
+</head>
+
+<body>
+    <div class = "container">
+        <div class = "left">
+            <div class = "col">
+                <canvas id="canvas" width="280" height="280" style="border:10px solid #FBF5F3"></canvas>
+                <button onclick="clearCanvas()">Clear</button>
+            </div>
+        </div>
+        <div class = "right" id="predictions">
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, 280, 280);
+
+        let drawing = false;
+
+        canvas.addEventListener("pointerdown", startDraw)
+        canvas.addEventListener("pointerup", stopDraw);
+        canvas.addEventListener("pointermove", draw);
+
+        function startDraw(e) {
+            drawing = true;
+            canvas.setPointerCapture(e.pointerId);
+            lastX = e.offsetX;
+            lastY = e.offsetY;
+        }
+
+        function stopDraw(e) {
+            drawing = false;
+            send()
+        }
+
+        function draw(e) {
+            if (!drawing) return;
+
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 20;
+            ctx.lineCap = "round";
+
+            ctx.beginPath();
+            ctx.moveTo(lastX ?? e.offsetX, lastY ?? e.offsetY);
+            ctx.lineTo(e.offsetX, e.offsetY);
+            ctx.stroke();
+
+            lastX = e.offsetX;
+            lastY = e.offsetY;
+        }
+
+        function canvasToArray() {
+            const img = ctx.getImageData(0, 0, 280, 280);
+            const data = img.data;
+
+            let pixels = [];
+
+            for (let i = 0; i < data.length; i +=4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+
+                const gray = (r + g + b)/3;
+                pixels.push(gray);
+            }
+            console.log(pixels)
+            
+            let small = [];
+
+            for (let y = 0; y < 28; y ++) {
+                for (let x = 0; x < 28; x++) {
+                    let sum = 0;
+
+                    for (let dy = 0; dy < 10; dy ++) {
+                        for (let dx = 0; dx < 10; dx ++) {
+                            let px = (y * 10 + dy) * 280 + (x * 10 + dx)
+                            sum += pixels[px];
+                        }
+                    }
+
+                    small.push(sum/(100 * 255));
+                }
+            }
+            console.log(small)
+            return small
+        }
+
+        function clearCanvas() {
+            ctx.fillStyle = "black"
+            ctx.fillRect(0, 0, 280, 280);
+        }
+
+        function renderPrediction(prediction) {
+            const container = document.getElementById("predictions");
+            container.innerHTML = "";
+
+            prediction.forEach((p, i) => {
+                const row = document.createElement("div");
+                row.className = "bar";
+
+                const label = document.createElement("div");
+                label.innerText = i;
+
+                const track = document.createElement("div");
+                track.className = "track";
+
+                const fill = document.createElement("div");
+                fill.className = "fill";
+                fill.style.width = (p * 150) + "px";
+
+                track.appendChild(fill);
+                row.appendChild(label);
+                row.appendChild(track);
+
+                container.appendChild(row);
+            });
+        }
+
+        function send() {
+            small = canvasToArray();
+
+            fetch("http://127.0.0.1:8000/predict", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({pixels: small})
+            })
+            .then(res => res.json())
+            .then(data => {
+                renderPrediction(data.prediction);
+            });
+        }
+        
+    </script>
+</body>
+</html>
