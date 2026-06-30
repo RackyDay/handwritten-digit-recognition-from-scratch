@@ -2,9 +2,13 @@ import random
 import math
 import numpy as np
 import matplotlib.pyplot as plt
+import base64
+import preprocessing
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+from io import BytesIO
+from PIL import Image
 
 training_images = 'training_data/train-images.idx3-ubyte'
 training_labels = 'training_data/train-labels.idx1-ubyte'
@@ -217,16 +221,29 @@ app.add_middleware(
 )
 
 class Request(BaseModel):
-    pixels: list[float]
-
-@app.get("/")
-def home():
-    return {"msg": "API running"}
+    image: str
 
 @app.post("/predict")
 def make_prediction(data: Request):
-    image = np.array(data.pixels)
-    prediction = predict(image, weights, biases)
-    print(prediction)
-    return {"prediction": prediction.tolist()}
+
+    _, encoded = data.image.split(",", 1)
+
+    image_bytes = base64.b64decode(encoded)
+
+    image = Image.open(BytesIO(image_bytes))
+    image = image.convert("L")
+
+    image = np.array(image)
+
+    cropped = preprocessing.crop(image)
+    scaled = preprocessing.scale_to_MNIST(cropped)
     
+    prediction = predict(scaled.flatten(), weights, biases)
+
+    processed_image = Image.fromarray((scaled * 255).astype(np.uint8))
+    buffer = BytesIO()
+    processed_image.save(buffer, format="PNG")
+
+    encoded = base64.b64encode(buffer.getvalue()).decode()
+
+    return {"prediction": prediction.tolist(), "processed_image": encoded}

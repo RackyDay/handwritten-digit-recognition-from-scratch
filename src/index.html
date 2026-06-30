@@ -5,74 +5,153 @@
     <title>DigitGuessr</title>
     <style>
         body {
-            background-color: #0f0f0f;
             margin: 0;
-            height: 100vh;
-        }
-
-        canvas {
-            touch-action: none;
-        }
-
-        .container{
-            display: flex;
-            height: 100%;
-        }
-
-        .left {
-            flex: 1;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-
-        .right {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
+            background: #0f0f0f;
             color: #FBF5F3;
+            font-family: Arial, Helvetica, sans-serif;
+            justify-content: center;
+            align-items: center;  
         }
 
-        .col {
+        h1 {
+            text-align: center;
+            margin-top: 30px;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #bbbbbb;
+            margin-bottom: 50px;
+        }
+
+        .pipeline {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 35px;
+        }
+
+        .card {
+            background: #1b1b1b;
+            border: 1px solid #2e2e2e;
+            border-radius: 15px;
+            padding: 25px;
+            width: 340px;
+
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 10px;
-            }
-        
+        }
+
+        .card h2 {
+            margin-top: 0;
+            margin-bottom: 20px;
+        }
+
+        canvas,
+        #processed_image {
+            border: 2px solid #FBF5F3;
+            image-rendering: pixelated;
+            background: black;
+        }
+
+        button {
+            margin-top: 20px;
+            padding: 10px 22px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            background: #3772FF;
+            color: white;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #2c5fda;
+            transition: background-color 0.1s ease-in-out;
+        }
+
+        .arrow {
+            font-size: 48px;
+            color: #3772FF;
+            font-weight: bold;
+        }
+
+        .caption {
+            margin-top: 15px;
+            color: #9f9f9f;
+        }
+
+        .prediction-card {
+            min-height: 400px;
+        }
+
+        .track {
+            width: 200px;
+            height: 12px;
+            background: #333;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .fill {
+            height: 100%;
+            width: 0%;          /* always percentage-based */
+            background: #3772FF;
+            transition: width 0.2s ease;
+        }
+
         .bar {
             display: flex;
             align-items: center;
             gap: 10px;
-            margin: 5px 0;
+            height: 20px;       /* prevents vertical shifting */
         }
 
-        .track {
-            width: 150px;
-            height: 10px;
-            background: #333;
+        .bar span {
+            width: 20px;        /* fixed label width so digits don't shift layout */
         }
-
-        .fill {
-            height: 10px;
-            background: #3772FF;
-        }
-
     </style>
 </head>
 
 <body>
-    <div class = "container">
-        <div class = "left">
-            <div class = "col">
-                <canvas id="canvas" width="280" height="280" style="border:10px solid #FBF5F3"></canvas>
-                <button onclick="clearCanvas()">Clear</button>
-            </div>
+    <h1>DigitGuessr</h1>
+    <p class="subtitle">Draw a digit and watch how the neural network interprets it.</p>
+
+    <div class="pipeline">
+
+        <div class="card">
+            <h2>1. Your Drawing</h2>
+
+            <canvas id="canvas" width="280" height="280"></canvas>
+
+            <button onclick="clearCanvas()">Clear Canvas</button>
         </div>
-        <div class = "right" id="predictions">
+
+        <div class="arrow">></div>
+
+        <div class="card">
+            <h2>2. Model Input</h2>
+
+            <img
+                id="processed_image"
+                width="280"
+                height="280">
+
+            <p class="caption">
+                28 x 28 centred grayscale image
+            </p>
         </div>
+
+        <div class="arrow">></div>
+
+        <div class="card prediction-card">
+            <h2>3. Prediction</h2>
+
+            <div id="predictions"></div>
+        </div>
+
     </div>
 
     <script>
@@ -116,45 +195,10 @@
             lastY = e.offsetY;
         }
 
-        function canvasToArray() {
-            const img = ctx.getImageData(0, 0, 280, 280);
-            const data = img.data;
-
-            let pixels = [];
-
-            for (let i = 0; i < data.length; i +=4) {
-                const r = data[i];
-                const g = data[i + 1];
-                const b = data[i + 2];
-
-                const gray = (r + g + b)/3;
-                pixels.push(gray);
-            }
-            console.log(pixels)
-            
-            let small = [];
-
-            for (let y = 0; y < 28; y ++) {
-                for (let x = 0; x < 28; x++) {
-                    let sum = 0;
-
-                    for (let dy = 0; dy < 10; dy ++) {
-                        for (let dx = 0; dx < 10; dx ++) {
-                            let px = (y * 10 + dy) * 280 + (x * 10 + dx)
-                            sum += pixels[px];
-                        }
-                    }
-
-                    small.push(sum/(100 * 255));
-                }
-            }
-            console.log(small)
-            return small
-        }
-
         function clearCanvas() {
             ctx.fillStyle = "black"
             ctx.fillRect(0, 0, 280, 280);
+            document.getElementById("processed_image").src = "";
         }
 
         function renderPrediction(prediction) {
@@ -162,38 +206,37 @@
             container.innerHTML = "";
 
             prediction.forEach((p, i) => {
-                const row = document.createElement("div");
-                row.className = "bar";
+                const bar = document.createElement("div");
+                bar.className = "bar";
 
-                const label = document.createElement("div");
-                label.innerText = i;
+                bar.innerHTML = `
+                    <span>${i}</span>
+                    <div class="track">
+                        <div class="fill" style="width: ${p * 100}%"></div>
+                    </div>
+                `;
 
-                const track = document.createElement("div");
-                track.className = "track";
-
-                const fill = document.createElement("div");
-                fill.className = "fill";
-                fill.style.width = (p * 150) + "px";
-
-                track.appendChild(fill);
-                row.appendChild(label);
-                row.appendChild(track);
-
-                container.appendChild(row);
+                container.appendChild(bar);
             });
         }
 
+        function renderProcessed(image) {
+            document.getElementById("processed_image").src = `data:image/png;base64,${image}`;
+        }
+
         function send() {
-            small = canvasToArray();
+
+            const image = canvas.toDataURL("image/png");
 
             fetch("http://127.0.0.1:8000/predict", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({pixels: small})
+                body: JSON.stringify({image})
             })
             .then(res => res.json())
             .then(data => {
                 renderPrediction(data.prediction);
+                renderProcessed(data.processed_image)
             });
         }
         
